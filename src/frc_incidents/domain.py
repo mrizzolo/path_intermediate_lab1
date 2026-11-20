@@ -8,6 +8,9 @@ hasta una clasificación o un informe operativo.
 
 from dataclasses import dataclass
 
+# Prioridades permitidas por el contrato de salida.
+VALID_PRIORITIES = ("LOW", "MEDIUM", "HIGH")
+
 
 class DomainValidationError(ValueError):
     """Indica que un dato de dominio no cumple las reglas mínimas."""
@@ -30,7 +33,12 @@ class Incident:
         """Comprueba las reglas que siempre deben cumplir las incidencias."""
         # ``strip`` elimina espacios: un identificador formado solo por espacios
         # también se considera vacío.
-        raise NotImplementedError("TODO: completar Incident.__post_init__")
+        if not self.incident_id.strip():
+            raise DomainValidationError("incident_id no puede estar vacío")
+        if len(self.description.strip()) < 10:
+            raise DomainValidationError("description debe tener al menos 10 caracteres")
+        if self.amount_eur < 0:
+            raise DomainValidationError("amount_eur no puede ser negativo")
 
 
 @dataclass(frozen=True)
@@ -45,4 +53,7 @@ class Prediction:
 
     def __post_init__(self) -> None:
         """Evita probabilidades y prioridades fuera del contrato."""
-        raise NotImplementedError("TODO: completar Prediction.__post_init__")
+        if not 0 <= self.confidence <= 1:
+            raise DomainValidationError("confidence debe estar entre 0 y 1")
+        if self.priority not in VALID_PRIORITIES:
+            raise DomainValidationError(f"priority debe ser una de {VALID_PRIORITIES}")
