@@ -26,7 +26,20 @@ class IncidentCsvRepository:
 
     def load(self, path: str | Path) -> list[Incident]:
         """Devuelve una lista de ``Incident`` a partir de un CSV UTF-8."""
-        raise NotImplementedError("TODO: completar IncidentCsvRepository.load")
+        # ``newline=""`` deja que el módulo csv gestione los saltos de línea
+        # igual en Windows, macOS y Linux.
+        with Path(path).open(encoding="utf-8", newline="") as handle:
+            # El repositorio solo convierte tipos; las reglas de negocio
+            # (id vacío, importe negativo...) las valida ``Incident``.
+            return [
+                Incident(
+                    incident_id=row["incident_id"],
+                    description=row["description"],
+                    amount_eur=float(row["amount_eur"]),
+                    urgent=_as_bool(row["urgent"]),
+                )
+                for row in csv.DictReader(handle)
+            ]
 
 
 class TrainingCsvRepository:
