@@ -57,7 +57,22 @@ def test_classifier_tokenizes_and_predicts(classifier) -> None:
     assert 0 <= confidence <= 1
 
 
-@pytest.mark.parametrize(("amount", "urgent", "expected"), [(20, False, "LOW"), (1_500, False, "MEDIUM"), (12_000, False, "HIGH"), (20, True, "HIGH")])
+@pytest.mark.parametrize(
+    ("amount", "urgent", "expected"),
+    [
+        (20, False, "LOW"),
+        (1_500, False, "MEDIUM"),
+        (12_000, False, "HIGH"),
+        (20, True, "HIGH"),
+        # Casos límite añadidos: justo por debajo y justo en cada umbral, y
+        # urgencia con importe mínimo.
+        (999.99, False, "LOW"),
+        (1_000, False, "MEDIUM"),
+        (9_999.99, False, "MEDIUM"),
+        (10_000, False, "HIGH"),
+        (0, True, "HIGH"),
+    ],
+)
 def test_priority_policy(amount: float, urgent: bool, expected: str) -> None:
     # Una sola prueba parametrizada documenta las cuatro ramas de la política.
     assert PriorityPolicy().calculate(Incident("INC-1", "Descripción de prueba", amount, urgent)) == expected
