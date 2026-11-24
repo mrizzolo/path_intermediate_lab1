@@ -26,7 +26,13 @@ class PriorityPolicy:
         """Calcula prioridad usando solo urgencia e importe sintético."""
         # La urgencia prevalece aunque el importe sea bajo. Un importe igual o
         # superior a 10 000 también requiere atención prioritaria en el Lab.
-        raise NotImplementedError("TODO: completar PriorityPolicy.calculate")
+        # Retornos tempranos ordenados de mayor a menor prioridad: cada
+        # incidencia cae exactamente en una rama, sin solapamientos.
+        if incident.urgent or incident.amount_eur >= 10_000:
+            return "HIGH"
+        if incident.amount_eur >= 1_000:
+            return "MEDIUM"
+        return "LOW"
 
 
 class IncidentClassificationService:
