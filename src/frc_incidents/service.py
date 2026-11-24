@@ -48,7 +48,21 @@ class IncidentClassificationService:
         """Construye una predicción trazable para una incidencia."""
         # Categoría y prioridad son dimensiones distintas: el modelo interpreta
         # el texto; la política aplica reglas operativas visibles.
-        raise NotImplementedError("TODO: completar IncidentClassificationService.classify")
+        category, confidence = self.classifier.predict(incident.description)
+        priority = self.priority_policy.calculate(incident)
+        urgency = "urgente" if incident.urgent else "no urgente"
+        explanation = (
+            f"Categoría sugerida {category} (confianza {confidence:.2f}) a partir de la descripción; "
+            f"prioridad {priority} por importe {incident.amount_eur:.2f} EUR e incidencia {urgency}. "
+            "Propuesta para revisión por un analista."
+        )
+        return Prediction(
+            incident_id=incident.incident_id,
+            category=category,
+            confidence=confidence,
+            priority=priority,
+            explanation=explanation,
+        )
 
     def classify_all(self, incidents: list[Incident]) -> list[Prediction]:
         """Aplica el mismo caso de uso a todas las incidencias, en orden."""
