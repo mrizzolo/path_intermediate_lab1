@@ -13,6 +13,10 @@ Nombre/equipo: Martín Rizzo Lozano. Fecha: 2026-11-24. Python usado: 3.12.10.
 | T3 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_classifier_tokenizes_and_predicts` | `1 passed` | `tests/test_lab.py::test_classifier_tokenizes_and_predicts` · `src/frc_incidents/classifier.py` |
 | T4 · `.venv\Scripts\python -m pytest -v tests/test_lab.py::test_priority_policy` | `9 passed` (4 casos originales + 5 casos límite añadidos) | `tests/test_lab.py::test_priority_policy` · `src/frc_incidents/service.py` (`PriorityPolicy.calculate`) |
 | T5 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_service_returns_explained_prediction tests/test_lab.py::test_json_writer_exports_valid_json` | `2 passed` | `tests/test_lab.py::test_service_returns_explained_prediction` y `tests/test_lab.py::test_json_writer_exports_valid_json` · `src/frc_incidents/service.py` (`IncidentClassificationService.classify`) |
+| T6 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_cli_processes_all_incidents` | `1 passed` | `tests/test_lab.py::test_cli_processes_all_incidents` · `src/frc_incidents/cli.py` |
+| T6 · `.venv\Scripts\python -m frc_incidents.cli --training data/training.csv --input data/incidents.csv --output output/predictions.json` | `Procesadas 3 incidencias sintéticas -> output/predictions.json` | `output/predictions.json` (la carpeta `output/` no existía antes de ejecutarlo) |
+| T6 · `.venv\Scripts\python -c "import json; print(len(json.load(open('output/predictions.json', encoding='utf-8'))))"` | `3` | `output/predictions.json` |
+| Suite completa · `.venv\Scripts\python -m pytest -q` | `17 passed` | `tests/test_lab.py` (todas las pruebas, sin desactivar ninguna aserción) |
 
 ## Casos positivos y negativos
 
@@ -47,6 +51,10 @@ Entrada → resultado observado → explicación. Completar con los casos de la 
   - Entrada: `.venv\Scripts\python -c "from frc_incidents.repositories import _as_bool; _as_bool('yes')"`
   - Resultado observado: la traza termina con `ValueError: urgent debe ser true o false` (lanzado en `repositories.py`, línea 20, dentro de `_as_bool`).
   - Explicación: solo se aceptan `true` y `false`; cualquier otro valor falla de forma explícita. No se usa `bool(cadena)` porque en Python `bool("false")` vale `True` y marcaría como urgente una incidencia que no lo es.
+- **Positivo (`urgent="false"` se convierte en `False`):**
+  - Entrada: `.venv\Scripts\python -c "from frc_incidents.repositories import _as_bool; print(_as_bool('false'))"`
+  - Resultado observado: `False`
+  - Explicación: la cadena `"false"` del CSV se convierte en el booleano `False`. Con `bool("false")` habría salido `True`, porque cualquier cadena no vacía es verdadera en Python.
 - **Positivo (datos de entrenamiento):**
   - Entrada: `.venv\Scripts\python -c "from frc_incidents.repositories import TrainingCsvRepository; d = TrainingCsvRepository().load('data/training.csv'); print(len(d), d[0])"`
   - Resultado observado: `6 ('Compra con tarjeta no reconocida en comercio online', 'card_fraud')`
@@ -102,6 +110,42 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
   - Resultado observado: `Prediction(incident_id='FRC-9', category='kyc_review', confidence=0.5, priority='LOW', explanation='Categoría sugerida kyc_review (confianza 0.50) a partir de la descripción; prioridad LOW por importe 50.00 EUR e incidencia no urgente. Propuesta para revisión por un analista.')`
   - Explicación: el servicio recibe sus dependencias por el constructor. Con un clasificador falso que siempre responde `('kyc_review', 0.5)`, la predicción usa exactamente esa respuesta: el servicio delega y no depende de una implementación concreta, solo del contrato `predict`.
 
+### Tarea 6 · CLI y JSON
+
+- **Positivo (ejecución real del CLI, caso de la guía):**
+  - Entrada: `.venv\Scripts\python -m frc_incidents.cli --training data/training.csv --input data/incidents.csv --output output/predictions.json`
+  - Resultado observado: `Procesadas 3 incidencias sintéticas -> output/predictions.json`
+  - Explicación: el CLI recibe las tres rutas, entrena el clasificador, clasifica las tres incidencias con el servicio y escribe el JSON. La carpeta `output/` no existía y la ha creado `JsonPredictionWriter`.
+- **Positivo (contenido del JSON):**
+  - Entrada: `Get-Content output/predictions.json -Encoding utf8`
+  - Resultado observado:
+    ```json
+    [
+      {
+        "incident_id": "FRC-101",
+        "category": "card_fraud",
+        "confidence": 0.9792,
+        "priority": "LOW",
+        "explanation": "Categoría sugerida card_fraud (confianza 0.98) a partir de la descripción; prioridad LOW por importe 850.00 EUR e incidencia no urgente. Propuesta para revisión por un analista."
+      },
+      {
+        "incident_id": "FRC-102",
+        "category": "transfer_risk",
+        "confidence": 0.9538,
+        "priority": "HIGH",
+        "explanation": "Categoría sugerida transfer_risk (confianza 0.95) a partir de la descripción; prioridad HIGH por importe 12500.00 EUR e incidencia urgente. Propuesta para revisión por un analista."
+      },
+      {
+        "incident_id": "FRC-103",
+        "category": "kyc_review",
+        "confidence": 0.9748,
+        "priority": "LOW",
+        "explanation": "Categoría sugerida kyc_review (confianza 0.97) a partir de la descripción; prioridad LOW por importe 0.00 EUR e incidencia no urgente. Propuesta para revisión por un analista."
+      }
+    ]
+    ```
+  - Explicación: JSON válido (se puede cargar con `json.load` y da `3`), en UTF-8 (las tildes se conservan), con una entrada por incidencia en el orden del CSV y exactamente los cinco campos del contrato: `incident_id`, `category`, `confidence`, `priority` y `explanation`.
+
 ## Decisiones y limitaciones
 
 - **Decisión 1 (T1):** las validaciones viven en `__post_init__` de dataclasses `frozen=True`.
@@ -117,7 +161,7 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
 
 ## Ayuda consultada y comprensión
 
-**Ayuda consultada:** he seguido `GUIA_ALUMNO.md` y `RUBRICA.md`, y he leído los comentarios del propio código. He usado Claude Code (asistente de IA) para revisar cómo iba la práctica, entender por qué fallaban algunos tests, guiarme en qué comandos ejecutar. Todo lo que aparece aquí lo he comprobado ejecutando yo mismo los tests y los comandos de la guía; los resultados que pongo son los que me salieron en mi terminal.
+**Ayuda consultada:** he seguido `GUIA_ALUMNO.md` y `RUBRICA.md`, y he leído los comentarios del propio código. He usado Claude Code para revisar el estado de la práctica, entender por qué fallaban algunos tests y guiarme en aquellos casos en los que no sabia continuar, además de formatear el texto markdown de este documento. Todo lo que aparece aquí lo he comprobado ejecutando yo mismo los tests y los comandos de la guía; los resultados que pongo son los que me salieron en mi terminal.
 
 **Una invariante (T1):** `Incident` no admite un importe negativo. Me parece importante que lo rechace al crearse, y no más adelante, porque así un dato imposible no puede colarse en ningún punto del proceso: si el objeto existe, ya sé que es válido, y no tengo que repetir la comprobación en el clasificador, en la política de prioridad o en el JSON. Además, al ser `frozen`, nadie puede cambiar el importe después.
 
@@ -127,7 +171,15 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
 
 **Qué hace el servicio (T5):** El servicio pide la categoría al clasificador y la prioridad a la política de prioridad, y después las junta en una predicción con su explicación.
 
-**Recorrido de una entrada de extremo a extremo:** pendiente (se completa al terminar T4–T6).
+**Recorrido de una entrada de extremo a extremo (FRC-102):**
+
+1. **Entrada:** se lee de `data/incidents.csv` con `IncidentCsvRepository`, que convierte el importe a número y `urgent` a booleano.
+2. **Validación:** se comprueba en la clase `Incident` (`__post_init__`): ID no vacío, descripción de al menos 10 caracteres e importe no negativo. Si algo falla, la incidencia no llega a crearse.
+3. **Categoría y prioridad:** el classifier sugiere `transfer_risk` con confianza `0.9538` a partir de la descripción, y la `PriorityPolicy` da `HIGH` porque es urgente (y además supera 10.000 EUR). El servicio junta las dos cosas en un `Prediction` con su explicación.
+4. **Salida:** acaba en la carpeta `output`, en `output/predictions.json`, con sus cinco campos.
+5. **Persona:** un analista revisa que sea correcto. El resultado es solo una propuesta: el sistema no bloquea operaciones ni toma decisiones; la decisión final la toma el analista, que puede aceptar, corregir o descartar la categoría.
+
+**Datos:** todos los datos usados en la práctica (`data/incidents.csv`, `data/training.csv` y los casos de prueba) son sintéticos; no hay clientes, cuentas ni operaciones reales.
 
 ## Autoevaluación
 
@@ -140,7 +192,7 @@ Una fila por subcriterio de RUBRICA.md: puntos solicitados y evidencia localizab
 | Dominio · rechaza importe negativo | 4 | 4 | `test_incident_rejects_negative_amount` PASSED + caso negativo T1 (`DomainValidationError: amount_eur no puede ser negativo`) |
 | Dominio · rechaza confianza fuera de [0,1] y prioridad desconocida | 3 | 3 | `test_prediction_rejects_invalid_confidence_and_priority` PASSED |
 | CSV · carga tres `Incident` tipados desde `incidents.csv` | 5 | 5 | Caso positivo T2: salida `3` + `test_csv_repository_loads_synthetic_incidents` PASSED |
-| CSV · valida `urgent` y convierte `false` a `False` sin `bool(cadena)` | 5 | 5 | `_as_bool` en `repositories.py` + caso negativo T2 (`ValueError: urgent debe ser true o false`) + `test_csv_repository_rejects_invalid_urgent` PASSED |
+| CSV · valida `urgent` y convierte `false` a `False` sin `bool(cadena)` | 5 | 5 | `_as_bool` en `repositories.py` + caso positivo T2 `'false'` → `False` + caso negativo T2 (`ValueError: urgent debe ser true o false`) + `test_csv_repository_rejects_invalid_urgent` PASSED |
 | CSV · carga pares de entrenamiento y conserva las validaciones de dominio | 5 | 5 | Caso positivo T2: `training.csv` → 6 pares `(texto, categoría)`; las incidencias siguen validándose en `Incident` (casos negativos T1) |
 | Clasificador · usa `fit` y `predict` con sus contratos sin reimplementar Naive Bayes | 5 | 5 | Contrato demostrado en los casos T3 (`fit` → `predict`, y `RuntimeError` sin entrenar); `classifier.py` sin modificar; llamada desde el servicio en `classify` (caso T5 con las tres incidencias) |
 | Clasificador · conserva categoría no vacía y confianza válida | 5 | 5 | Caso positivo T3: `('transfer_risk', 0.9538)` + `test_classifier_tokenizes_and_predicts` PASSED |
@@ -150,5 +202,12 @@ Una fila por subcriterio de RUBRICA.md: puntos solicitados y evidencia localizab
 | Servicio · recibe dependencias y delega categoría y prioridad | 5 | 5 | `IncidentClassificationService.__init__` recibe clasificador y política; caso T5 con clasificador sustituido → usa su respuesta |
 | Servicio · conserva identificador, orden y número de entradas | 5 | 5 | Caso T5: 3 incidencias → 3 predicciones `FRC-101`, `FRC-102`, `FRC-103` en el orden del CSV |
 | Servicio · cada predicción incluye una explicación coherente con sus campos | 5 | 5 | Caso T5: cada explicación repite categoría, confianza, prioridad, importe y urgencia de su predicción; `test_service_returns_explained_prediction` PASSED |
+| Exportación y CLI · procesa los tres registros desde las rutas indicadas | 5 | 5 | Ejecución real del CLI con `--training`, `--input` y `--output` → `Procesadas 3 incidencias sintéticas`; `test_cli_processes_all_incidents` PASSED |
+| Exportación y CLI · JSON UTF-8 válido con todos los campos y carpeta de salida creada | 5 | 5 | `output/` creada por el CLI; `json.load` → `3`; contenido con los cinco campos y tildes correctas (caso T6); `test_json_writer_exports_valid_json` PASSED |
+| Pruebas · la suite proporcionada pasa sin desactivar aserciones | 5 | 5 | `pytest -q` → `17 passed` |
+| Pruebas · evidencia de límites y del rechazo de `urgent` inválido | 5 | 5 | Tabla de límites T4 (casos añadidos al parametrize) + caso negativo T2 `urgent='yes'` + `test_csv_repository_rejects_invalid_urgent` PASSED |
+| Comprensión · explica categoría frente a prioridad y una invariante | 4 | 4 | Apartado "Ayuda consultada y comprensión": categoría frente a prioridad (T4) e invariante del importe (T1) |
+| Comprensión · registra comandos, resultados reales y ayuda consultada | 3 | 3 | Apartados "Comprobaciones reales" y "Casos positivos y negativos" con salidas reales; "Ayuda consultada" |
+| Comprensión · declara datos sintéticos, limitación y decisión humana | 3 | 3 | Datos sintéticos declarados en "Ayuda consultada y comprensión"; limitaciones T2 y T3; decisión humana en el paso 5 del recorrido de FRC-102 |
 
-Subtotal T1–T5: 70 / 70.
+Total: 100 / 100.
