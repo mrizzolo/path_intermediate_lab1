@@ -12,6 +12,7 @@ Nombre/equipo: Martín Rizzo Lozano. Fecha: 2026-11-24. Python usado: 3.12.10.
 | T2 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_csv_repository_loads_synthetic_incidents tests/test_lab.py::test_csv_repository_rejects_invalid_urgent` | `2 passed` | `tests/test_lab.py::test_csv_repository_loads_synthetic_incidents` y `tests/test_lab.py::test_csv_repository_rejects_invalid_urgent` · `src/frc_incidents/repositories.py` |
 | T3 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_classifier_tokenizes_and_predicts` | `1 passed` | `tests/test_lab.py::test_classifier_tokenizes_and_predicts` · `src/frc_incidents/classifier.py` |
 | T4 · `.venv\Scripts\python -m pytest -v tests/test_lab.py::test_priority_policy` | `9 passed` (4 casos originales + 5 casos límite añadidos) | `tests/test_lab.py::test_priority_policy` · `src/frc_incidents/service.py` (`PriorityPolicy.calculate`) |
+| T5 · `.venv\Scripts\python -m pytest -q -rA tests/test_lab.py::test_service_returns_explained_prediction tests/test_lab.py::test_json_writer_exports_valid_json` | `2 passed` | `tests/test_lab.py::test_service_returns_explained_prediction` y `tests/test_lab.py::test_json_writer_exports_valid_json` · `src/frc_incidents/service.py` (`IncidentClassificationService.classify`) |
 
 ## Casos positivos y negativos
 
@@ -85,6 +86,22 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
   - Resultado observado: `MEDIUM`
   - Explicación: la regla es "desde 1.000 EUR", es decir `>=`; un importe de exactamente 1.000 sin urgencia entra en el nivel superior (`MEDIUM`), no en `LOW`.
 
+### Tarea 5 · Servicio y explicación
+
+- **Positivo (las tres incidencias del dataset):**
+  - Entrada: `.venv\Scripts\python -c "from frc_incidents.repositories import IncidentCsvRepository, TrainingCsvRepository; from frc_incidents.classifier import ProvidedNaiveBayesClassifier; from frc_incidents.service import IncidentClassificationService, PriorityPolicy; s = IncidentClassificationService(ProvidedNaiveBayesClassifier().fit(TrainingCsvRepository().load('data/training.csv')), PriorityPolicy()); [print(p) for p in s.classify_all(IncidentCsvRepository().load('data/incidents.csv'))]"`
+  - Resultado observado:
+    ```text
+    Prediction(incident_id='FRC-101', category='card_fraud', confidence=0.9792, priority='LOW', explanation='Categoría sugerida card_fraud (confianza 0.98) a partir de la descripción; prioridad LOW por importe 850.00 EUR e incidencia no urgente. Propuesta para revisión por un analista.')
+    Prediction(incident_id='FRC-102', category='transfer_risk', confidence=0.9538, priority='HIGH', explanation='Categoría sugerida transfer_risk (confianza 0.95) a partir de la descripción; prioridad HIGH por importe 12500.00 EUR e incidencia urgente. Propuesta para revisión por un analista.')
+    Prediction(incident_id='FRC-103', category='kyc_review', confidence=0.9748, priority='LOW', explanation='Categoría sugerida kyc_review (confianza 0.97) a partir de la descripción; prioridad LOW por importe 0.00 EUR e incidencia no urgente. Propuesta para revisión por un analista.')
+    ```
+  - Explicación: entran 3 incidencias y salen 3 predicciones, con los mismos identificadores y en el mismo orden que el CSV. El servicio llama al clasificador para la categoría y a la política para la prioridad, y la explicación se construye con esos mismos valores, así que siempre es coherente con los campos.
+- **Positivo (clasificador sustituido):**
+  - Entrada: `.venv\Scripts\python -c "from frc_incidents.domain import Incident; from frc_incidents.service import IncidentClassificationService, PriorityPolicy; fake = type('Fake', (), {'predict': lambda self, text: ('kyc_review', 0.5)})(); print(IncidentClassificationService(fake, PriorityPolicy()).classify(Incident('FRC-9', 'Descripción suficientemente larga', 50, False)))"`
+  - Resultado observado: `Prediction(incident_id='FRC-9', category='kyc_review', confidence=0.5, priority='LOW', explanation='Categoría sugerida kyc_review (confianza 0.50) a partir de la descripción; prioridad LOW por importe 50.00 EUR e incidencia no urgente. Propuesta para revisión por un analista.')`
+  - Explicación: el servicio recibe sus dependencias por el constructor. Con un clasificador falso que siempre responde `('kyc_review', 0.5)`, la predicción usa exactamente esa respuesta: el servicio delega y no depende de una implementación concreta, solo del contrato `predict`.
+
 ## Decisiones y limitaciones
 
 - **Decisión 1 (T1):** las validaciones viven en `__post_init__` de dataclasses `frozen=True`.
@@ -93,6 +110,8 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
   - Motivo: las reglas de negocio quedan en el dominio y no se duplican; y `bool("false")` daría `True`, marcando como urgente una incidencia que no lo es.
 - **Decisión 3 (T4):** la comprobación de `urgent` va en el primer `if`, junto al importe ≥10.000, con retornos tempranos de mayor a menor prioridad.
   - Motivo: si `urgent` es `true`, independientemente de la cantidad la prioridad siempre será alta. Si se comprobara antes el importe medio, una incidencia urgente de 1.500 EUR acabaría en `MEDIUM` por error.
+- **Decisión 4 (T5):** el servicio recibe el clasificador y la política por el constructor (inyección de dependencias) y depende del protocolo `Classifier`, no de una clase concreta.
+  - Motivo: así puedo cambiar el clasificador sin tocar el servicio. Por ejemplo, en el caso T5 he usado un clasificador falso para probarlo.
 - **Limitación (T2):** si una sola fila del CSV es inválida, la carga completa falla en esa fila; no se cargan las filas válidas ni se obtiene un informe de qué filas fallaron.
 - **Limitación (T3):** con solo 6 ejemplos de entrenamiento el clasificador no es fiable; una confianza alta (`0.9538`) no significa que el caso sea realmente fraude.
 
@@ -105,6 +124,8 @@ Las cinco últimas filas son casos límite que he añadido al `@pytest.mark.para
 **Contrato del clasificador (T3):** `fit` recibe ejemplos en tuplas `(texto, categoría)` y `predict` devuelve una tupla con la categoría con la mayor puntuación y la confianza en el resultado. La precondición es llamar a `fit` antes de `predict`: si no se cumple, `predict` lanza `RuntimeError: El clasificador debe entrenarse antes de predecir`. Es mejor que falle así, porque un modelo sin entrenar no sabe nada y cualquier categoría que devolviera sería inventada y parecería un resultado válido.
 
 **Categoría frente a prioridad (T4):** La categoría la sugiere el clasificador a partir del texto de la descripción: indica qué tipo de caso es (`card_fraud`, `transfer_risk` o `kyc_review`), es una estimación. La prioridad se calcula a partir de reglas fijas basadas en el importe y la urgencia: indica con qué urgencia hay que revisarlo (`LOW`, `MEDIUM` o `HIGH`) y siempre da el mismo resultado. Son independientes: una misma categoría puede tener cualquier prioridad.
+
+**Qué hace el servicio (T5):** El servicio pide la categoría al clasificador y la prioridad a la política de prioridad, y después las junta en una predicción con su explicación.
 
 **Recorrido de una entrada de extremo a extremo:** pendiente (se completa al terminar T4–T6).
 
@@ -121,10 +142,13 @@ Una fila por subcriterio de RUBRICA.md: puntos solicitados y evidencia localizab
 | CSV · carga tres `Incident` tipados desde `incidents.csv` | 5 | 5 | Caso positivo T2: salida `3` + `test_csv_repository_loads_synthetic_incidents` PASSED |
 | CSV · valida `urgent` y convierte `false` a `False` sin `bool(cadena)` | 5 | 5 | `_as_bool` en `repositories.py` + caso negativo T2 (`ValueError: urgent debe ser true o false`) + `test_csv_repository_rejects_invalid_urgent` PASSED |
 | CSV · carga pares de entrenamiento y conserva las validaciones de dominio | 5 | 5 | Caso positivo T2: `training.csv` → 6 pares `(texto, categoría)`; las incidencias siguen validándose en `Incident` (casos negativos T1) |
-| Clasificador · usa `fit` y `predict` con sus contratos sin reimplementar Naive Bayes | 5 | Pendiente (T5) | Contrato demostrado en los casos T3 (`fit` → `predict`, y `RuntimeError` sin entrenar); `classifier.py` sin modificar. Falta la llamada desde servicio/CLI |
+| Clasificador · usa `fit` y `predict` con sus contratos sin reimplementar Naive Bayes | 5 | 5 | Contrato demostrado en los casos T3 (`fit` → `predict`, y `RuntimeError` sin entrenar); `classifier.py` sin modificar; llamada desde el servicio en `classify` (caso T5 con las tres incidencias) |
 | Clasificador · conserva categoría no vacía y confianza válida | 5 | 5 | Caso positivo T3: `('transfer_risk', 0.9538)` + `test_classifier_tokenizes_and_predicts` PASSED |
 | Política · urgencia o importe ≥10.000 da HIGH | 5 | 5 | Tabla T4: `12000-False`, `10000-False`, `20-True` y `0-True` → HIGH, PASSED |
 | Política · entre 1.000 y menos de 10.000 sin urgencia da MEDIUM; por debajo da LOW | 5 | 5 | Tabla T4: `1500`, `1000`, `9999.99` → MEDIUM; `20`, `999.99` → LOW, PASSED; caso manual `1000` → `MEDIUM` |
 | Política · demuestra 999,99 / 1.000 / 9.999,99 / 10.000 y urgente con importe bajo | 5 | 5 | Casos límite añadidos al parametrize de `test_priority_policy`, todos PASSED (tabla T4) |
+| Servicio · recibe dependencias y delega categoría y prioridad | 5 | 5 | `IncidentClassificationService.__init__` recibe clasificador y política; caso T5 con clasificador sustituido → usa su respuesta |
+| Servicio · conserva identificador, orden y número de entradas | 5 | 5 | Caso T5: 3 incidencias → 3 predicciones `FRC-101`, `FRC-102`, `FRC-103` en el orden del CSV |
+| Servicio · cada predicción incluye una explicación coherente con sus campos | 5 | 5 | Caso T5: cada explicación repite categoría, confianza, prioridad, importe y urgencia de su predicción; `test_service_returns_explained_prediction` PASSED |
 
-Subtotal T1–T4: 50 / 55 (1 subcriterio pendiente hasta T5).
+Subtotal T1–T5: 70 / 70.
